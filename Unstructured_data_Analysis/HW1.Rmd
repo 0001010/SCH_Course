@@ -1,0 +1,357 @@
+---
+title: "비정형_과제"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+<br></br>
+
+
+## 개요
+
+목표 : **수업시간에 한 것보다 더 높은 정확도를 기록**
+
+시도해볼 것 
+<br></br>
+1. 다양한 feature들을 더 뽑을 예정<br></br>
+2. rotationrate, userAcceleration 이외에 더 다른 feature를 사용할 예정
+       
+       
+       
+       
+
+## 라이브러리 import
+```{r setup, message = FALSE, warning = FALSE}
+library(stringr)
+library(dplyr)
+library(moments)
+library(tidyverse)
+library(RWeka)
+
+library(seewave)
+library(fBasics)
+library(signal)
+library(pracma)
+
+library(e1071)
+library(pracma)
+library(changepoint)
+```
+
+
+
+
+
+## 데이터 불러오기 및 함수정의
+
+```{r}
+path = 'C:/Users/student/Downloads/motion-sense-master/motion-sense-master/data/A_DeviceMotion_data/A_DeviceMotion_data'
+setwd(path)
+
+fls <- dir(path, recursive = TRUE) # 파일 리스트를 변수에 저장
+
+for(f in fls){
+  a <- file.path(str_c(path, "/", f)) # 파일경로를 풀 네임 경로로 만듬
+  temp <- read.csv(a) # 파일읽기
+  assign(f, temp) # f문자열에 객체를 할당함
+}
+
+
+# mag함수( x,y,z의 제곱을 다 더한다음 루트를 씌움 )
+mag <- function(df, column){
+  df[, str_c('mag', column)] <- 
+    with(df, 
+         sqrt(get(str_c(column, ".x"))^2 + get(str_c(column,".y"))^2 + get(str_c(column, ".z"))^2)) 
+  return (df)
+}
+
+# mag_attitudet(위의 mag함수와 내용은 같은데 attitudet의 .이후의 변수명이 달라서 다르게 적용)
+mag_attitudet <- function(df, column){
+  df[, str_c('mag', column)] <- 
+    with(df, 
+         sqrt(get(str_c(column,".roll"))^2 + get(str_c(column,".pitch"))^2 + get(str_c(column, ".yaw"))^2)) 
+  return (df)
+}
+
+# skewness 함수
+skewnesss <- function(x){
+  (sum((x-mean(x))^3)/length(x)) / ((sum((x-mean(x))^2)/length(x)))^(3/2)
+}
+
+# rss 함수
+rss <- function(x) rms(x)*(length(x))^0.5
+
+# mode 함수(최빈값)
+modes <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+
+
+HAR_total <- data.frame()
+
+for(f in fls){
+  temp <- get(f)
+  HAR_total <- rbind(HAR_total, temp%>%mutate(exp_no = unlist(regmatches(f, gregexpr("[[:digit:]]+", f)[1]))[1], # har_total에 exp_no라는 변수를 추가(exp_no는 f에서 정수만 가져옴)
+                                              id = unlist(regmatches(f, gregexpr("[[:digit:]]+", f)[1]))[2], # id를 추가하는데 정수만 추출해서 2번째 항목을 가져옴
+                                              activity = unlist(str_split(f,"\\_"))[1])) # activity를 추가하는데 f에서 _를 기준으로 split해서 첫번째를 가져옴
+}
+
+
+HAR_total <- mag(HAR_total, "userAcceleration") # mag함수를 만들어놓은것에 useracc을 연산해서 har_total에 추가
+HAR_total <- mag(HAR_total, "rotationRate") # mag함수를 만들어놓은것에roraion 연산해서 har_total에 추가
+HAR_total <- mag_attitudet(HAR_total, "attitude") # mag함수와 같은데 attitudent의 .이후의 변수가 다르므로 다르게 적용
+
+```
+
+path를 정해주고 path에 있는 csv파일들을 전부 변수로 저장해줌.
+
+"mag"라는 함수를 정의(x, y, z축 각각을 제곱후 합해줌 -> 이것을 루트를 씌움)
+"mag_attitudet" 함수 정의(mag와 내용은 같음 -> attitudet변수들의 .이후의 변수명들이 다르므로 다르게 적용)
+"skewness" 함수를 정의(통계학의 skewness의 정의를 이용)
+"rss" 함수 정의(신호의 크기를 나타내는 rms에 데이터 갯수를 고려해서 신호크기를 맞춤)
+"modes" 함수 정의(최빈값) :: 크게 의미는 없을듯함
+
+HAR_total이라는 빈 데이터 프레임을 만든후 id, exp_no, activity를 추출후 변수로 넣어준다.
+HAR_total에 있는 변수 userAcceleration, rotationRate 위에서 만든 mag함수를 넣어서 각 변수별로 mag값들을 변수로 넣어준다.<br></br>
+HAR_total에 있는 변수 attitude 위에서 만든 mag_attitudet함수를 넣어서 각 변수별로 mag값들을 변수로 넣어준다.
+
+attitudet의 경우 roll값은 x축을 기준으로 회전, pitch는 y축을 기준으로 회전, yaw는 z축을 기준으로 회전한다.
+
+The roll,pitch,yaw of the device, in radians. -> 단위는 라디안인듯하다.(정확하게 어떤 수치인지는 모르겠다.)
+[Apple developer 참고](https://developer.apple.com/documentation/coremotion/cmattitude)
+
+각도와 회전에 관한 feature이므로 개별로 진행하는것보단 mag함수를 쓰는게 좋을듯하다.
+
+
+## 통계특질에 대한 모델링
+
+```{r}
+set.seed(123456)
+
+RF <- make_Weka_classifier("weka/classifiers/trees/RandomForest") # rweka에 있는 rf를 꺼내온다.
+
+HAR_summary <- HAR_total %>% group_by(id, exp_no, activity) %>%
+  summarize_at(.var = c("maguserAcceleration", "magrotationRate","gravity.x","gravity.y","gravity.z", "magattitude"), .funs = c(mean, min, max, sd, skewness))
+
+HAR_summary_extend <- HAR_total %>% group_by(id, exp_no, activity)%>%
+  summarise_at(.vars = c("maguserAcceleration", "magrotationRate","gravity.x","gravity.y","gravity.z","magattitude"),.funs = c(mean, min, max, sd, skewness, rms,rss,IQR, e1071::kurtosis, modes))
+# mag연산한 feature들과 gravity x,y,z에 대한 mean, max, min, sd, skewness, rms, rss, IQR, kurtosis를 추출후 HAR_summary_extend에 저장
+
+activity <- HAR_summary%>%ungroup()%>%select(c(colnames(HAR_summary)[str_detect(colnames(HAR_summary),"mag")],"activity")) # 정답변수로 만듬
+HAR_summary_extend2 <- HAR_summary_extend %>% ungroup() %>% select(-c("id", "exp_no")) # HAR_summary_extend에서 id와 exp_no를 뺀다.
+
+
+m <- RF(as.factor(activity)~., data = HAR_summary_extend2) # HAR_summary_extend2를 학습데이터로 삼고 rf를 돌려줌
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+
+
+e
+# 10-fold기준 정확도 93~94%
+
+```
+
+
+gravity는 mag를 쓰지않아도 특징이 잘 나타난다. <br></br> -> 굳이 mag를 쓰지않아도 되고 써도 성능향상이 미미할것으로 보임.<br></br>
+id, exp_no, activity별로 mean, max, min, sd, skewness, rms, rss, IQR, kurtosis, modes를 x,y,z각각 구해주면 더 좋은 결과를 낼 수 있다.(중력센서이므로 x,y,z축에 대한 의미가 커보인다.)
+
+10-fold기준으로 **93~94%**의 정확도를 보이고 있고 gravity x,y,z와 magattiuden를 추가하기전에는 86~89%사이의 정확도를 보였던것에 비하면 성능향상이 있다.
+
+
+## Peak특질에 대한 모델링
+
+```{r}
+# 위에서 mag_attitude을 사용했으므로 여기에서도 사용
+for (d in fls){
+  f <- get(d) 
+  f <- mag(f, "rotationRate") 
+  f <- mag(f, "userAcceleration")
+  f <- mag_attitudet(f, "attitude")
+  assign(d, f)
+}
+
+
+peak_rslt <- data.frame()
+
+# Peak들의 interval, max, min, std, mean, median, iqr을 구함
+for (d in fls){
+  f <- get(d)
+  p <- findpeaks(f$magrotationRate, threshold = 4) # peak를 찾는데 magrotation에서 4이상인 값들을 p에 저장
+  peak_rslt <- rbind(peak_rslt, data.frame(d, 
+                                           f_n = ifelse(!is.null(p), dim(p)[1],0),
+                                           p_interval = ifelse(!is.null(p), ifelse(dim(p)[1]>1, mean(diff(sort(p[,2]))),0),0),
+                                           p_interval_std = ifelse(!is.null(p), ifelse(dim(p)[1]>2, std(diff(sort(p[,2]))),0),0), 
+                                           p_mean = ifelse(!is.null(p), mean(p[,1]),0), 
+                                           p_max = ifelse(!is.null(p), max(p[,1]),0),
+                                           p_min = ifelse(!is.null(p), min(p[,1]),0),
+                                           p_med = ifelse(!is.null(p), median(p[,1]),0),
+                                           p_iqr = ifelse(!is.null(p), ifelse(dim(p)[1]>1, IQR(p[,1]),0),0),
+                                           p_std = ifelse(!is.null(p), ifelse(dim(p)[1]>1, std(p[,1]),0),0)))
+}
+
+
+temp <- get(fls[1])
+p_temp <- findpeaks(temp$magrotationRate, threshold = 4)
+
+temp <- data.frame()
+
+for (d in fls){
+  f <- get(d)
+  f <- f %>% select(magrotationRate, maguserAcceleration, magattitude)
+  cfR <- crest(f$magrotationRate, 50)
+  cfA <- crest(f$maguserAcceleration, 50)
+  cfat <- crest(f$magattitude, 50)
+  temp <- rbind(temp, data.frame(d, cfR = cfR$C, cfA = cfA$C, cfat$C)) # 여태까지 계산한것들을 temp에 rbind로 넣음
+}
+
+
+peak_final <- merge(peak_rslt, temp, by = "d") # temp에서 나온걸로 peak_rslt와 함침(peak_final)
+
+id_f <- function(x){
+  exp_no = unlist(regmatches(x, gregexpr("[[:digit:]]+", x)[1]))[1]
+  id = unlist(regmatches(x, gregexpr("[[:digit:]]+",x)[1]))[2]
+  activity = unlist(str_split(x,"\\_"))[1]
+  
+  return(cbind(exp_no,id, activity))
+}
+
+
+temp <- data.frame()
+for (i in 1:nrow(peak_final)){
+  temp <- rbind(temp, id_f(peak_final$d[i]))
+}
+
+peak_final2 <- cbind(peak_final, temp)
+
+activity_peak <- peak_final2 %>% ungroup() %>% select(-d, -exp_no, -id)
+
+m <- RF(as.factor(activity)~., data = activity_peak)
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+
+e
+# 약 69~70% 사이의 성능을 보임(전처리전(학교에서는 60%안밖이었음))
+
+d <- merge(activity, activity_peak, by = "activity")
+
+m <- RF(as.factor(activity)~., data = d)
+summary(m)
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+
+
+e
+# 여기는 100%
+
+```
+
+peak에서는 통계특질에서 사용한 mag_attitude를 추가했다.
+여러 peak값들중에서 IQR과 Median를 추가해줘서 성능을 향상시킴 10-fold기준 **60% -> 69~70%**
+(여러통계치를 추출할수 있지만 그나마 성능향상의 도움이 되는 IQR, Median을 고름)
+
+crest에서도 mag_attitude를 추가해줌.
+
+즉, peak, crest에서 수업시간에 사용하지않은 attitude를 사용
+
+
+## 변화분석 특질
+```{r}
+# 통계 특질에서도 magattitude를 사용했으므로 여기에서도 사용
+
+ch_pt <- data.frame()
+
+for (d in fls){
+  f <- get(d)
+  f <- mag(f, "rotationRate")
+  f <- mag(f, "userAcceleration")
+  f <- mag_attitudet(f, "attitude")
+  rslt <- sapply(f %>% select(magrotationRate, maguserAcceleration, magattitude),cpt.mean) # mean의 변화를 체크
+  rslt_cpts1 <- cpts(rslt$magrotationRate)
+  rslt_cpts2 <- cpts(rslt$maguserAcceleration)
+  rslt_cpts3 <- cpts(rslt$magattitude)
+  
+  rslt2 <- sapply(f %>% select(magrotationRate, maguserAcceleration, magattitude),cpt.var) # var의 변화를 체크
+  
+  rslt2_cpts1 <- cpts(rslt2$magrotationRate)
+  rslt2_cpts2 <- cpts(rslt2$maguserAcceleration)
+  rslt2_cpts3 <- cpts(rslt2$magattitude)
+  
+  rslt3 <- sapply(f %>% select(magrotationRate, maguserAcceleration,magattitude),cpt.meanvar) # meanvar 변화 체크
+  rslt3_cpts1 <- cpts(rslt3$magrotationRate)
+  rslt3_cpts2 <- cpts(rslt3$maguserAcceleration)
+  rslt3_cpts3 <- cpts(rslt3$magattitude)
+  ch_pt <- rbind(ch_pt, data.frame(d, 
+                                   cp1 = length(rslt_cpts1), 
+                                   cp2 = length(rslt_cpts2), 
+                                   cp3 = length(rslt_cpts3),
+                                   cp4 = length(rslt2_cpts1), 
+                                   cp5 = length(rslt2_cpts2), 
+                                   cp6 = length(rslt2_cpts3),
+                                   cp7 = length(rslt3_cpts1), 
+                                   cp8 = length(rslt3_cpts2),
+                                   cp9 = length(rslt3_cpts3)))
+}
+
+# 수업시간과의 다른점은 attiude 변수가 추가 되어서 mean, var, meanvar의 cpts가 하나씩 추가 되었다는 점.
+
+
+temp <- data.frame()
+for (i in 1:nrow(ch_pt)){
+  temp <- rbind(temp, id_f(ch_pt$d[i]))
+}
+
+ch_pt <- cbind(ch_pt, temp)
+
+ch_pt2 <- ch_pt%>%ungroup()%>%select(-d, -exp_no, -id)
+
+m <- RF(as.factor(activity)~., data = ch_pt2)
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+e
+
+# 성능체크 해보니까 약 50%의 성능이 나오고 있다.
+```
+
+변화분석에서는 magattitude를 더 사용했고 mean, var, meanvar의 cpts들이 하나더 추가 되었다.
+추가적인 변수 생성없었을때는 학교기준 47%정도의 성능이 보였는데 지금은 **약 50%**정도의 성능이 나온다.
+
+[changpoint 참고](https://cran.r-project.org/web/packages/changepoint/changepoint.pdf)를 했는데 mean, var, meanvar 3개만 제공되어서 추가적인 변수생성은 어려웠다.
+
+
+## 모두 합치기
+```{r}
+
+## peak와 change point 합치기
+peak_final3 <- merge(peak_final2, ch_pt, by = c("d","exp_no","id","activity"))
+
+combined <- peak_final3%>%select(-d, -exp_no, -id)
+
+m <- RF(as.factor(activity)~., data = combined)
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+e
+# 약 69~70%
+
+
+## peak + change point + stat 합치기
+combinde2 <- peak_final3%>%select(-d)
+peak_final3 <- merge(combinde2, HAR_summary_extend, by = c("id", "exp_no", "activity"))
+peak_final3 <- peak_final3%>%ungroup()%>%select(-exp_no, -id)
+
+m <- RF(as.factor(activity)~., data = peak_final3)
+e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+
+
+e
+# 약 94~95%
+```
+
+peak와 change point를 합쳤을때는 성능이 **약 69~70%**가 나왔다. peak만 했을때도 69~70%였는데 change point를 합쳤다고해서 성능향상이 일어나는건 아닌거같다.
+
+peak + change point + stat을 했을때는 **약 94~95%**의 성능이 나온다. 이거 역시 크게 성능이 올라간건 아니다.
+
+
+## 이모저모
+
+- 사실 데이터가 많아지고 모델이 점점 복잡해지는데 모두 다 합칠 필요가 있을까? 생각이 든다.
+- 여러 feature를 추가해서 통계특질 우선적으로 뽑아내는게 데이터측면이나 모델측면에서 좋을듯하다. 
+- 센서에 대해서 잘 몰라서 찾아보면서 진행하긴 했는데 센서들의 특성들을 잘알면 더 많은 특징들을 찾아낼 수 있고 더 좋은 성능을 낼 수 있을 듯 하다.
