@@ -19,6 +19,8 @@ library(shinythemes)
 #------------------Data import------------------#
 
 path = 'C:/Users/icear/OneDrive/바탕 화면/6학기/비정형데이터분석/motion-sense-master/data/A_DeviceMotion_data/A_DeviceMotion_data'
+# path를 데이터가 있는 폴더로 맞춰주세요
+
 setwd(path)
 
 
@@ -36,7 +38,11 @@ for(f in fls){
   temp <- get(f)
   HAR_total <- rbind(HAR_total, temp%>%mutate(exp_no = unlist(regmatches(f, gregexpr("[[:digit:]]+", f)[1]))[1],
                                               id = unlist(regmatches(f, gregexpr("[[:digit:]]+", f)[1]))[2], 
-                                              activity = unlist(str_split(f,"\\_"))[1]))}
+                                              activity = unlist(str_split(f,"\\_"))[1]
+                                              )
+  )
+}
+
 
 
 #-------------------------------------------------#
@@ -66,9 +72,20 @@ modes <- function(v) {
   uniqv[which.max(tabulate(match(v, uniqv)))]
 }
 
+# id_f 함수
+id_f <- function(x){
+  exp_no = unlist(regmatches(x, gregexpr("[[:digit:]]+", x)[1]))[1]
+  id = unlist(regmatches(x, gregexpr("[[:digit:]]+",x)[1]))[2]
+  activity = unlist(str_split(x,"\\_"))[1]
+  
+  return(cbind(exp_no,id, activity))
+}
+
+# Model은 RF를 쓸것이므로 RF함수 호출
 RF <- make_Weka_classifier("weka/classifiers/trees/RandomForest")
 
 #---------------------------------------------#
+
 
 #--------------------UI-----------------------#
 
@@ -77,7 +94,8 @@ ui <- fluidPage(
   titlePanel(h1('비정형 데이터 분석 과제', align = "center")),
   h4('20171481 박은총', align = "right"),
   
-  sidebarPanel(tabsetPanel(
+  sidebarPanel(width = 3,
+               tabsetPanel(
     
     # stat 
     tabPanel(title = 'stat setting',
@@ -103,7 +121,7 @@ ui <- fluidPage(
     
     # peak
     tabPanel(title = 'peaks setting',
-             
+
              selectInput(inputId = 'mag_var2',
                          label = 'mag연산 할 컬럼을 선택하세요',
                          choices = NULL,
@@ -124,7 +142,23 @@ ui <- fluidPage(
                           icon = icon(name = 'sync'))),
     
     # change point
-    tabPanel(title = 'change point setting'))
+    tabPanel(title = 'change point setting',
+             
+             selectInput(inputId = 'mag_var3',
+                         label = 'mag 연산 할 칼럼을 선택하세요',
+                         choices = NULL,
+                         multiple = TRUE),
+             
+             selectInput(inputId = 'change_point_function',
+                         label = 'change point 연산 함수를 선택하세요',
+                         choices = NULL,
+                         multiple = TRUE),
+             
+             submitButton(text = '변경사항을 적용합니다.',
+                          icon = icon(name = 'sync')
+                          )
+             )
+    )
 ),
   
 
@@ -133,6 +167,7 @@ ui <- fluidPage(
   )
 )
 #---------------------------------------------#
+
 
 #-------------------SERVER--------------------#
 
@@ -158,6 +193,15 @@ server <- function(input, output, session){
     updateSelectInput(session = session, inputId = 'mag_var2', choices = colss2)
     updateNumericInput(session = session, inputId = 'threshold_num', value = peak_threshold)
     updateNumericInput(session = session, inputId = 'crest_HZ', value = hz)
+  })
+  
+  # change point observe
+  observe({
+    colss3 <- c('maguserAcceleration', 'magrotationRate')
+    change_point_select <- c('cpt.mean', 'cpt.var', 'cpt.meanvar')
+    
+    updateSelectInput(session = session, inputId = 'mag_var3', choices = colss3)
+    updateSelectInput(session = session, inputId = 'change_point_function', choices = change_point_select)
   })
   
   # stat render for shiny app
@@ -207,7 +251,7 @@ server <- function(input, output, session){
     }
     
     temp <- get(fls[1])
-    p_temp <- findpeaks(temp$magrotationRate, threshold = 4)
+    p_temp <- findpeaks(temp$magrotationRate, threshold = input$threshold_num)
     
     temp <- data.frame()
     
@@ -222,13 +266,7 @@ server <- function(input, output, session){
     
     peak_final <- merge(peak_rslt, temp, by = "d")
     
-    id_f <- function(x){
-      exp_no = unlist(regmatches(x, gregexpr("[[:digit:]]+", x)[1]))[1]
-      id = unlist(regmatches(x, gregexpr("[[:digit:]]+",x)[1]))[2]
-      activity = unlist(str_split(x,"\\_"))[1]
-      
-      return(cbind(exp_no,id, activity))
-    }
+
     
     
     temp <- data.frame()
@@ -248,6 +286,85 @@ server <- function(input, output, session){
     s
   })
   
+  # change point for shiny app
+  output$change_point <- renderText({
+    
+    ch_pt <- data.frame()
+    
+    for (d in fls){
+      f <- get(d)
+      f <- mag(f, 'userAcceleration')
+      f <- mag(f, 'rotationRate')
+      
+      s<-input$mag_var3
+    
+      if (length(input$change_point_function)==1){
+        rslt <- sapply(f %>% select(s), input$change_point_function[1])
+        rslt_cpts1 <- cpts(rslt$maguserAcceleration)
+        rslt_cpts2 <- cpts(rslt$magrotationRate)
+        
+        ch_pt <- rbind(ch_pt, data.frame(d, 
+                                         length(rslt_cpts1),
+                                         length(rslt_cpts2)))
+      } 
+      
+      else if (length(input$change_point_function)==2){
+        rslt <- sapply(f %>% select(s), input$change_point_function[1]) 
+        rslt_cpts1 <- cpts(rslt$maguserAcceleration)
+        rslt_cpts2 <- cpts(rslt$magrotationRate)
+        
+        rslt2 <- sapply(f %>% select(s),input$change_point_function[2]) 
+        rslt2_cpts1 <- cpts(rslt2$maguserAcceleration)
+        rslt2_cpts2 <- cpts(rslt2$magrotationRate)
+        
+        ch_pt <- rbind(ch_pt, data.frame(d, 
+                                         length(rslt_cpts1),
+                                         length(rslt_cpts2),
+                                         length(rslt2_cpts1),
+                                         length(rslt2_cpts2)))
+      } 
+      
+      else if (length(input$change_point_function)==3){
+        
+        rslt <- sapply(f %>% select(s), input$change_point_function[1]) 
+        rslt_cpts1 <- cpts(rslt$maguserAcceleration)
+        rslt_cpts2 <- cpts(rslt$magrotationRate)
+        
+        rslt2 <- sapply(f %>% select(s),input$change_point_function[2]) 
+        rslt2_cpts1 <- cpts(rslt2$maguserAcceleration)
+        rslt2_cpts2 <- cpts(rslt2$magrotationRate)
+        
+        rslt3 <- sapply(f %>% select(s),input$change_point_function[3]) 
+        rslt3_cpts1 <- cpts(rslt3$maguserAcceleration)
+        rslt3_cpts2 <- cpts(rslt3$magrotationRate)
+        
+        ch_pt <- rbind(ch_pt, data.frame(d, 
+                                         length(rslt_cpts1),
+                                         length(rslt_cpts2),
+                                         length(rslt2_cpts1),
+                                         length(rslt2_cpts2),
+                                         length(rslt3_cpts1),
+                                         length(rslt3_cpts2)))
+      }
+  
+    }
+    
+    temp <- data.frame()
+    for (i in 1:nrow(ch_pt)){
+      temp <- rbind(temp, id_f(ch_pt$d[i]))
+    }
+    
+    ch_pt <- cbind(ch_pt, temp)
+    
+    ch_pt2 <- ch_pt%>%ungroup()%>%select(-d, -exp_no, -id)
+    
+    m <- RF(as.factor(activity)~., data = ch_pt2)
+    e <- evaluate_Weka_classifier(m, numFolds = 10, complexity = TRUE, class = TRUE)
+    
+    s <- as.character(e$string)
+    s
+  }
+)
 
   # Main UI
   output$mainUI <- renderUI({
@@ -266,7 +383,7 @@ server <- function(input, output, session){
       tabPanel(title = 'change point',
                h4('Random Forest Result Report'),
                
-               tableOutput(outputId = 'stat_rf'))
+               verbatimTextOutput(outputId = 'change_point'))
         
       )
     })
