@@ -18,5 +18,5 @@
 - 랜덤포레스트로 K-Fold 10기준 정확도 약 48%
 
 4. 모두 결합
-- 위의 1,2,3을 모두 결합했을 때 정확도 94~95%
-<img src="./image/rf.PNG" width="450" height="500"><br>
+- 위의 1,2,3을 모두 결합했을 때 정확도 94~95%<br></br>
+<img src="./image/rf.PNG" width="650" height="500"><br>
