@@ -19,5 +19,4 @@
 
 4. 모두 결합
 - 위의 1,2,3을 모두 결합했을 때 정확도 94~95%
-	- 1번의 통계특질로 모델링한것보다 약간 더 올랐다.
-<img src="./image/rf.PNG" width="350" height="350"><br>
+<img src="./image/rf.PNG" width="450" height="500"><br>
