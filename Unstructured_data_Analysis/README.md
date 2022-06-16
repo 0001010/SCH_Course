@@ -1,7 +1,7 @@
 # 🔎 Unstructured_data_Analysis
 
 ### ‼ HW1
-[데이터] : https://github.com/mmalekzadeh/motion-sense를 가지고 통계변수 추출, Peak추출, 변화분석 추출하기
+센서[데이터](https://github.com/mmalekzadeh/motion-sense)를 가지고 통계변수 추출, Peak추출, 변화분석 추출하기
 
 ### ‼ HW2
 - HW1에서 진행했던 것들을 R Shiny App으로 제작
