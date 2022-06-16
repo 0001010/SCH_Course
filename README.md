@@ -5,3 +5,6 @@
 - Machine-Learning
 - Hadoop
 - SNA
+
+### ⏲ 2022-1
+- Unstructured Data Analysis
